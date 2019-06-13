@@ -2,12 +2,12 @@
   (:import
     (java.io FileOutputStream FileInputStream InputStream OutputStream)
    (java.util Date Calendar)
-   (org.apache.poi.xssf.usermodel XSSFWorkbook)
+   (org.apache.poi.xssf.usermodel XSSFWorkbook XSSFCellStyle)
    (org.apache.poi.hssf.usermodel HSSFWorkbook)
    (org.apache.poi.ss.usermodel Workbook Sheet Cell Row
                                 FormulaError
                                 WorkbookFactory DateUtil
-                                IndexedColors CellStyle Font
+                                IndexedColors Font
                                 CellValue Drawing CreationHelper)
    (org.apache.poi.ss.util CellReference AreaReference)))
 
@@ -178,6 +178,17 @@
                                        cell (cell-seq x)]
                                    cell))
 
+(defn set-row-style!
+  "Apply a style to all the cells in a row.
+   Returns the row."
+  [^Row row ^XSSFCellStyle style]
+  (assert-type row Row)
+  (assert-type style XSSFCellStyle)
+  (doseq [^Cell c (cell-seq row)
+          :when c]
+    (.setCellStyle c style))
+  row)
+
 (defn into-seq
   [^Iterable sheet-or-row]
   (vec (for [item (iterator-seq (.iterator sheet-or-row))] item)))
@@ -252,15 +263,29 @@
       (if (= (.getCellType cell) Cell/CELL_TYPE_FORMULA) (.setCellType cell Cell/CELL_TYPE_BLANK))
       (.setCellValue cell null))))
 
-(defn add-row! [^Sheet sheet values]
-  (assert-type sheet Sheet)
-  (let [row-num (if (= 0 (.getPhysicalNumberOfRows sheet))
-                  0
-                  (inc (.getLastRowNum sheet)))
-        row (.createRow sheet row-num)]
-    (doseq [[column-index value] (map-indexed #(list %1 %2) values)]
-      (set-cell! (.createCell row column-index) value))
-    row))
+(defn add-row! 
+  ([^Sheet sheet values] (add-row! sheet values nil))
+  ([^Sheet sheet values ^XSSFCellStyle style]
+    (assert-type sheet Sheet)
+    (let [row-num (if (= 0 (.getPhysicalNumberOfRows sheet))
+                    0
+                    (inc (.getLastRowNum sheet)))
+          row (.createRow sheet row-num)
+          col-offset (atom 0)]
+      (.setHeight row -1)
+      (doseq [[column-index {value :value style :style col-span :col-span}] (map-indexed #(list %1 %2) values)]
+        (set-cell! (let [c (.createCell row (+ column-index @col-offset))]
+                     (if style (.setCellStyle c style))
+                     (if col-span 
+                       (do 
+                         (.addMergedRegion sheet (org.apache.poi.ss.util.CellRangeAddress. row-num row-num (+ @col-offset column-index) (+ (+ @col-offset column-index) (dec col-span))))
+                         (swap! col-offset + (dec col-span)))) 
+                     c) value))
+      (if style (do  (set-row-style! row style)))
+      (let [cells (filter identity (cell-seq row))]
+        (doseq [[column-index {style :style}] (map-indexed #(list %1 %2) values)]
+          (if style (.setCellStyle (nth cells column-index) style))))
+      row)))
 
 (defn add-rows!
   "Add rows to the sheet. The rows is a sequence of row-data, where
@@ -358,7 +383,7 @@
 (defn create-xls-workbook
   "Create a new XLS workbook with a single sheet and the data specified."
   [sheet-name data]
-  (let [workbook (HSSFWorkbook.)
+  (let [workbook (XSSFWorkbook.)
         sheet    (add-sheet! workbook sheet-name)]
     (add-rows! sheet data)
     workbook))
@@ -367,35 +392,35 @@
 ;       helpers for font and style creation
 
 
-(defn color-index
+(defn color-from-hex
   "Returns color index from org.apache.ss.usermodel.IndexedColors
    from lowercase keywords"
-  [colorkw]
-  (.getIndex (IndexedColors/valueOf (.toUpperCase (name colorkw)))))
+  [hex]
+ (org.apache.poi.xssf.usermodel.XSSFColor. (java.awt.Color. (Integer/valueOf (subs hex 1 3) 16) (Integer/valueOf (subs hex 3 5) 16) (Integer/valueOf (subs hex 5 7) 16))))
 
 (defn horiz-align
   "Returns horizontal alignment"
   [kw]
   (case kw
-    :left CellStyle/ALIGN_LEFT
-    :right CellStyle/ALIGN_RIGHT
-    :center CellStyle/ALIGN_CENTER))
+    :left XSSFCellStyle/ALIGN_LEFT
+    :right XSSFCellStyle/ALIGN_RIGHT
+    :center XSSFCellStyle/ALIGN_CENTER))
 
 (defn vert-align
   "Returns vertical alignment"
   [kw]
   (case kw
-    :top CellStyle/VERTICAL_TOP
-    :bottom CellStyle/VERTICAL_BOTTOM
-    :center CellStyle/VERTICAL_CENTER))
+    :top XSSFCellStyle/VERTICAL_TOP
+    :bottom XSSFCellStyle/VERTICAL_BOTTOM
+    :center XSSFCellStyle/VERTICAL_CENTER))
 
 (defn border
   "Returns border style"
   [kw]
   (case kw
-    :thin CellStyle/BORDER_THIN
-    :medium CellStyle/BORDER_MEDIUM
-    :thick CellStyle/BORDER_THICK))
+    :thin XSSFCellStyle/BORDER_THIN
+    :medium XSSFCellStyle/BORDER_MEDIUM
+    :thick XSSFCellStyle/BORDER_THICK))
 
 (defmacro whens
   "Processes any and all expressions whose tests evaluate to true.
@@ -439,7 +464,7 @@
     (whens
      name      (.setFontName f name)
      size      (.setFontHeightInPoints f size)
-     color     (.setColor f (color-index color))
+     color     (.setColor f (color-from-hex color))
      bold      (.setBoldweight f Font/BOLDWEIGHT_BOLD)
      italic    (.setItalic f true)
      underline (.setUnderline f Font/U_SINGLE))
@@ -456,11 +481,11 @@
 
 (extend-protocol IFontable
   clojure.lang.PersistentArrayMap
-  (set-font [this ^CellStyle style workbook]
+  (set-font [this ^XSSFCellStyle style workbook]
     (.setFont style (create-font! workbook this)))
   (as-font [this workbook] (create-font! workbook this))
   org.apache.poi.ss.usermodel.Font
-  (set-font [this ^CellStyle style _] (.setFont style this))
+  (set-font [this ^XSSFCellStyle style _] (.setFont style this))
   (as-font [this _] this)
   org.apache.poi.xssf.usermodel.XSSFCellStyle
   (get-font [this _] (.getFont this))
@@ -501,10 +526,10 @@
                            :font {:name \"Arial\" :bold true :italic true},
                            :wrap true, :border-bottom :thin})
   "
-  ([^Workbook workbook] (create-cell-style! workbook {}))
+  ([^XSSFWorkbook workbook] (create-cell-style! workbook {}))
 
-  ([^Workbook workbook styles]
-     (assert-type workbook Workbook)
+  ([^XSSFWorkbook workbook styles]
+     (assert-type workbook XSSFWorkbook)
      (let [cs (.createCellStyle workbook)
            {:keys [background font halign valign wrap
                    border-left border-right border-top border-bottom
@@ -513,8 +538,8 @@
                    borders indent data-format]} styles]
        (whens
         font   (set-font font cs workbook)
-        background (do (.setFillForegroundColor cs (color-index background))
-                       (.setFillPattern cs CellStyle/SOLID_FOREGROUND))
+        background (do (.setFillForegroundColor cs (color-from-hex background))
+                       (.setFillPattern cs XSSFCellStyle/SOLID_FOREGROUND))
         halign (.setAlignment cs (horiz-align halign))
         valign (.setVerticalAlignment cs (vert-align valign))
         wrap   (.setWrapText cs true)
@@ -523,13 +548,13 @@
         border-top (.setBorderTop cs (border border-top))
         border-bottom (.setBorderBottom cs (border border-bottom))
         left-border-color (.setLeftBorderColor
-                            cs (color-index left-border-color))
+                            cs (color-from-hex left-border-color))
         right-border-color (.setRightBorderColor
-                             cs (color-index right-border-color))
+                             cs (color-from-hex right-border-color))
         top-border-color (.setTopBorderColor
-                           cs (color-index top-border-color))
+                           cs (color-from-hex top-border-color))
         bottom-border-color (.setBottomBorderColor
-                              cs (color-index bottom-border-color))
+                              cs (color-from-hex bottom-border-color))
         indent (.setIndention cs (short indent))
         data-format (let [df (.createDataFormat workbook)]
                       (.setDataFormat cs (.getFormat df data-format))))
@@ -539,9 +564,9 @@
   "Apply a style to a cell.
    See also: create-cell-style!.
   "
-  [^Cell cell ^CellStyle style]
+  [^Cell cell ^XSSFCellStyle style]
   (assert-type cell Cell)
-  (assert-type style CellStyle)
+  (assert-type style XSSFCellStyle)
   (.setCellStyle cell style)
   cell)
 
@@ -581,16 +606,7 @@
       (.setCellComment cell comment))
     cell))
 
-(defn set-row-style!
-  "Apply a style to all the cells in a row.
-   Returns the row."
-  [^Row row ^CellStyle style]
-  (assert-type row Row)
-  (assert-type style CellStyle)
-  (doseq [^Cell c (cell-seq row)
-          :when c]
-    (.setCellStyle c style))
-  row)
+
 
 (defn get-row-styles
   "Returns a seq of the row's CellStyles.

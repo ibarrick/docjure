@@ -1,11 +1,11 @@
-(defproject dk.ative/docjure "1.12.0-SNAPSHOT"
+(defproject ibarrick/docjure "1.12.1-SNAPSHOT"
   :description "Easily read and write Office documents from Clojure."
   :url "http://github.com/mjul/docjure"
   :license {:name "MIT License"
             :url "http://http://en.wikipedia.org/wiki/MIT_License"}
   :dependencies [[org.clojure/clojure "1.8.0"]
-                 [org.apache.poi/poi "3.14"]
-                 [org.apache.poi/poi-ooxml "3.14"]]
+                 [org.apache.poi/poi "3.16"]
+                 [org.apache.poi/poi-ooxml "3.16"]]
   :plugins [[lein-difftest "2.0.0"]]
   :profiles {:1.3  {:dependencies [[org.clojure/clojure "1.3.0"]]}
              :1.4  {:dependencies [[org.clojure/clojure "1.4.0"]]}
