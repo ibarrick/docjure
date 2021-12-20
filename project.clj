@@ -1,4 +1,4 @@
-(defproject ibarrick/docjure "1.12.1-SNAPSHOT"
+(defproject ibarrick/docjure "1.12.2-SNAPSHOT"
   :description "Easily read and write Office documents from Clojure."
   :url "http://github.com/mjul/docjure"
   :license {:name "MIT License"
