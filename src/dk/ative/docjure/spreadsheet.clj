@@ -226,12 +226,18 @@
   (let [cls (class value)]
     (or (isa? cls Date) (isa? cls Calendar))))
 
+(defn get-format-style [wb ^String format]
+	(let [date-style (.createCellStyle wb)
+		  format-helper (.getCreationHelper wb)]
+		(.setDataFormat date-style (.. format-helper createDataFormat (getFormat format)))
+		date-style))
+
+(def get-format-style-memo (memoize get-format-style))
+
 (defn apply-date-format! [^Cell cell ^String format]
   (let [workbook (.. cell getSheet getWorkbook)
-        date-style (.createCellStyle workbook)
-        format-helper (.getCreationHelper workbook)]
-    (.setDataFormat date-style
-                    (.. format-helper createDataFormat (getFormat format)))
+        date-style (get-format-style-memo workbook format)
+        ]
     (.setCellStyle cell date-style)))
 
 (defmulti set-cell! (fn [^Cell cell val] (type val)))
